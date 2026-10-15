@@ -20,17 +20,18 @@ app = Flask(__name__)
 app.secret_key = 'kaokob_eservice_secret_key_2026'
 
 DB_NAME = 'eservice.db'
-UPLOAD_FOLDER = 'static/uploads'
+# ใช้ absolute path สำหรับโฟลเดอร์อัปโหลด
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# ==================== ตั้งค่า LINE Messaging API ====================
-# นำ Channel Access Token และ User ID / Group ID จาก LINE Developers มาวางตรงนี้
-LINE_CHANNEL_ACCESS_TOKEN = (
-    'YOUR_LINE_CHANNEL_ACCESS_TOKEN'  # ใส่ Token ของ LINE OA
+# ตั้งค่า LINE Token (หากยังไม่มี ให้ใส่เป็นสตริงว่างไว้ก่อนได้)
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get(
+    'LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'
 )
-LINE_TARGET_ID = 'YOUR_LINE_USER_OR_GROUP_ID'  # ใส่ User ID หรือ Group ID ที่ต้องการให้แจ้งเตือนไปถึง
+LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID', 'YOUR_LINE_USER_OR_GROUP_ID')
 
 
 def send_line_notification(
@@ -42,60 +43,40 @@ def send_line_notification(
     latitude='',
     longitude='',
 ):
-  """ฟังก์ชันสำหรับส่งข้อความแจ้งเตือนไปยัง LINE เมื่อมีคำร้องใหม่"""
+  """ส่งแจ้งเตือนเข้า LINE โดยไม่ทำให้เว็บแครชหากส่งไม่สำเร็จ"""
   if (
-      LINE_CHANNEL_ACCESS_TOKEN == 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'
-      or not LINE_CHANNEL_ACCESS_TOKEN
+      not LINE_CHANNEL_ACCESS_TOKEN
+      or 'YOUR_LINE' in LINE_CHANNEL_ACCESS_TOKEN
   ):
-    print(
-      'ยังไม่ได้ตั้งค่า LINE Token (ระบบจะบันทึกคำร้องปกติโดยไม่ส่งแจ้งเตือน)'
-  )
+    print('ยังไม่ได้ตั้งค่า LINE Token')
     return
 
-  url = 'https://api.line.me/v2/bot/message/push'
-  headers = {
-      'Content-Type': 'application/json',
-      'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}',
-  }
-
-  # ข้อความแจ้งเตือนที่จะส่งเข้า LINE
-  msg_text = (
-      f'🏛️ **มีคำร้อง E-Service ใหม่ (อบต.เขากอบ)**\n'
-      f'➖➖➖➖➖➖➖➖➖➖\n'
-      f'📌 **เลขที่คำร้อง:** {tracking_no}\n'
-      f'📂 **ประเภทบริการ:** {service_type}\n'
-      f'👤 **ผู้ยื่นคำร้อง:** {fullname}\n'
-      f'📞 **เบอร์โทรศัพท์:** {phone}\n'
-      f'📝 **รายละเอียด:** {details}\n'
-  )
-
-  if latitude and longitude:
-    msg_text += (
-        f'📍 **พิกัดแผนที่:**'
-        f' https://www.google.com/maps?q={latitude},{longitude}\n'
-    )
-
-  msg_text += (
-      f'⏰ **เวลาที่ยื่น:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n'
-      f'➖➖➖➖➖➖➖➖➖➖\n'
-      f'🌐 เข้าตรวจสอบและดำเนินการได้ที่ระบบหลังบ้านเจ้าหน้าที่'
-  )
-
-  payload = {
-      'to': LINE_TARGET_ID,
-      'messages': [{'type': 'text', 'text': msg_text}],
-  }
-
   try:
-    response = requests.post(
-        url, headers=headers, data=json.dumps(payload), timeout=5
+    url = 'https://api.line.me/v2/bot/message/push'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}',
+    }
+    msg_text = (
+        f'🏛️ มีคำร้อง E-Service ใหม่ (อบต.เขากอบ)\n'
+        f'📌 เลขที่: {tracking_no}\n'
+        f'📂 ประเภท: {service_type}\n'
+        f'👤 ผู้ยื่น: {fullname}\n'
+        f'📞 เบอร์โทร: {phone}\n'
+        f'📝 รายละเอียด: {details}\n'
     )
-    if response.status_code == 200:
-      print('ส่งแจ้งเตือนเข้า LINE สำเร็จ!')
-    else:
-      print(f'ส่ง LINE ไม่สำเร็จ Status Code: {response.status_code}')
+    if latitude and longitude:
+      msg_text += (
+          f'📍 พิกัด: https://www.google.com/maps?q={latitude},{longitude}\n'
+      )
+
+    payload = {
+        'to': LINE_TARGET_ID,
+        'messages': [{'type': 'text', 'text': msg_text}],
+    }
+    requests.post(url, headers=headers, data=json.dumps(payload), timeout=3)
   except Exception as e:
-    print(f'เกิดข้อผิดพลาดในการส่ง LINE: {e}')
+    print(f'LINE Send Error: {e}')
 
 
 def allowed_file(filename):
@@ -106,9 +87,12 @@ def allowed_file(filename):
 
 
 def init_db():
-  """สร้างตารางฐานข้อมูล SQLite และโฟลเดอร์อัปโหลด"""
+  # ตรวจสอบและสร้างโฟลเดอร์ uploads
   if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+    try:
+      os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    except Exception as e:
+      print(f'Cannot create upload folder: {e}')
 
   conn = sqlite3.connect(DB_NAME)
   cursor = conn.cursor()
@@ -260,7 +244,6 @@ def index():
   )
 
 
-# --- 1. ยื่นคำร้อง (บันทึกข้อมูล + ส่งแจ้งเตือนไปยัง LINE) ---
 @app.route('/submit', methods=['POST'])
 def submit():
   service_type = request.form.get('service_type')
@@ -274,11 +257,16 @@ def submit():
   image_filename = ''
   if 'request_image' in request.files:
     file = request.files['request_image']
-    if file and allowed_file(file.filename):
-      filename = secure_filename(file.filename)
-      timestamp_str = datetime.now().strftime('%Y%m%d%H%M%S_')
-      image_filename = timestamp_str + filename
-      file.save(os.path.join(app.config['UPLOAD_FOLDER'], image_filename))
+    if file and file.filename != '' and allowed_file(file.filename):
+      try:
+        filename = secure_filename(file.filename)
+        timestamp_str = datetime.now().strftime('%Y%m%d%H%M%S_')
+        image_filename = timestamp_str + filename
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+          os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], image_filename))
+      except Exception as e:
+        print(f'Save file error: {e}')
 
   date_str = datetime.now().strftime('%Y%m%d')
   conn = sqlite3.connect(DB_NAME)
@@ -328,7 +316,6 @@ def submit():
   conn.commit()
   conn.close()
 
-  # 🔔 เรียกใช้งานฟังก์ชันส่งข้อความแจ้งเตือนไปที่ LINE
   send_line_notification(
       tracking_no,
       fullname,
@@ -343,7 +330,6 @@ def submit():
   return redirect(url_for('index', tab='track', track_query=tracking_no))
 
 
-# --- 2. ระบบ Login / Logout / Change Password ---
 @app.route('/login', methods=['POST'])
 def login():
   username = request.form.get('username')
@@ -409,7 +395,6 @@ def logout():
   return redirect(url_for('index', tab='officer'))
 
 
-# --- 3. อัปเดตงานสำหรับเจ้าหน้าที่ ---
 @app.route('/officer/update/<int:req_id>', methods=['POST'])
 @login_required
 def officer_update(req_id):
@@ -445,6 +430,8 @@ def officer_update(req_id):
   return redirect(url_for('index', tab='officer'))
 
 
+# เรียกสร้าง DB ตอนรันไฟล์
+init_db()
+
 if __name__ == '__main__':
-  init_db()
   app.run(host='0.0.0.0', port=5000, debug=True)
