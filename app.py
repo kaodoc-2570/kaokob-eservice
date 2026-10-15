@@ -19,15 +19,14 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = 'kaokob_eservice_secret_key_2026'
 
-DB_NAME = 'eservice.db'
-# ใช้ absolute path สำหรับโฟลเดอร์อัปโหลด
+# ใช้ absolute path เพื่อป้องกันปัญหา Path ไม่ตรงบน Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_NAME = os.path.join(BASE_DIR, 'eservice.db')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# ตั้งค่า LINE Token (หากยังไม่มี ให้ใส่เป็นสตริงว่างไว้ก่อนได้)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get(
     'LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'
 )
@@ -43,7 +42,6 @@ def send_line_notification(
     latitude='',
     longitude='',
 ):
-  """ส่งแจ้งเตือนเข้า LINE โดยไม่ทำให้เว็บแครชหากส่งไม่สำเร็จ"""
   if (
       not LINE_CHANNEL_ACCESS_TOKEN
       or 'YOUR_LINE' in LINE_CHANNEL_ACCESS_TOKEN
@@ -87,69 +85,80 @@ def allowed_file(filename):
 
 
 def init_db():
-  # ตรวจสอบและสร้างโฟลเดอร์ uploads
+  """สร้างโฟลเดอร์ uploads และตาราง SQLite หากยังไม่มี"""
   if not os.path.exists(UPLOAD_FOLDER):
     try:
       os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     except Exception as e:
       print(f'Cannot create upload folder: {e}')
 
-  conn = sqlite3.connect(DB_NAME)
-  cursor = conn.cursor()
+  try:
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
 
-  cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            fullname TEXT NOT NULL
-        )
-    ''')
+    cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                fullname TEXT NOT NULL
+            )
+        ''')
 
-  cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tracking_no TEXT UNIQUE NOT NULL,
-            citizen_id TEXT NOT NULL,
-            fullname TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            service_type TEXT NOT NULL,
-            details TEXT NOT NULL,
-            image_filename TEXT DEFAULT '',
-            latitude TEXT DEFAULT '',
-            longitude TEXT DEFAULT '',
-            status TEXT DEFAULT 'รอเจ้าหน้าที่รับเรื่อง',
-            assigned_officer TEXT DEFAULT '',
-            admin_note TEXT DEFAULT '',
-            created_at TEXT NOT NULL
-        )
-    ''')
+    cursor.execute('''
+            CREATE TABLE IF NOT EXISTS requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracking_no TEXT UNIQUE NOT NULL,
+                citizen_id TEXT NOT NULL,
+                fullname TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                details TEXT NOT NULL,
+                image_filename TEXT DEFAULT '',
+                latitude TEXT DEFAULT '',
+                longitude TEXT DEFAULT '',
+                status TEXT DEFAULT 'รอเจ้าหน้าที่รับเรื่อง',
+                assigned_officer TEXT DEFAULT '',
+                admin_note TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        ''')
 
-  cursor.execute('''
-        CREATE TABLE IF NOT EXISTS service_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            request_id INTEGER NOT NULL,
-            staff_name TEXT NOT NULL,
-            action_status TEXT NOT NULL,
-            log_detail TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (request_id) REFERENCES requests (id)
-        )
-    ''')
+    cursor.execute('''
+            CREATE TABLE IF NOT EXISTS service_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER NOT NULL,
+                staff_name TEXT NOT NULL,
+                action_status TEXT NOT NULL,
+                log_detail TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (request_id) REFERENCES requests (id)
+            )
+        ''')
 
-  cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'")
-  if cursor.fetchone()[0] == 0:
-    default_password_hash = generate_password_hash('kaokob1234')
-    cursor.execute(
-        '''
-            INSERT INTO users (username, password, fullname)
-            VALUES (?, ?, ?)
-        ''',
-        ('admin', default_password_hash, 'เจ้าหน้าที่ อบต.เขากอบ'),
-    )
+    cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'")
+    if cursor.fetchone()[0] == 0:
+      default_password_hash = generate_password_hash('kaokob1234')
+      cursor.execute(
+          '''
+                INSERT INTO users (username, password, fullname)
+                VALUES (?, ?, ?)
+            ''',
+          ('admin', default_password_hash, 'เจ้าหน้าที่ อบต.เขากอบ'),
+      )
 
-  conn.commit()
-  conn.close()
+    conn.commit()
+    conn.close()
+  except Exception as e:
+    print(f'Database Init Error: {e}')
+
+
+# ให้รันการตรวจสอบฐานข้อมูลก่อนประมวลผล Request แรก
+@app.before_request
+def auto_init():
+  if not getattr(app, '_got_first_request', False):
+    init_db()
+    app._got_first_request = True
 
 
 def login_required(f):
@@ -417,21 +426,4 @@ def officer_update(req_id):
 
   cursor.execute(
       '''
-        INSERT INTO service_logs (request_id, staff_name, action_status, log_detail, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''',
-      (req_id, staff_name, action_status, log_detail, created_at),
-  )
-
-  conn.commit()
-  conn.close()
-
-  flash('บันทึกการดำเนินการเรียบร้อยแล้ว', 'success')
-  return redirect(url_for('index', tab='officer'))
-
-
-# เรียกสร้าง DB ตอนรันไฟล์
-init_db()
-
-if __name__ == '__main__':
-  app.run(host='0.0.0.0', port=5000, debug=True)
+        INSERT INTO service_logs (request
