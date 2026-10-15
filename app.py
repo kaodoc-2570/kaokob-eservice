@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = 'kaokob_eservice_secret_key_2026'
 
-# ใช้ Absolute Path เพื่อป้องกันปัญหาเรื่อง Directory บน Render
+# ใช้ Absolute Path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, 'eservice.db')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
@@ -32,6 +32,16 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get(
     'LINE_CHANNEL_ACCESS_TOKEN', 'YOUR_LINE_CHANNEL_ACCESS_TOKEN'
 )
 LINE_TARGET_ID = os.environ.get('LINE_TARGET_ID', 'YOUR_LINE_USER_OR_GROUP_ID')
+
+
+# 🚨 ดักจับทุก Error ในระบบเพื่อแสดงผลบนหน้าจอทันที
+@app.errorhandler(Exception)
+def handle_exception(e):
+  return (
+      f'<h2>❌ เกิดข้อผิดพลาด (Global Diagnostic):</h2><pre>'
+      f'{traceback.format_exc()}</pre>',
+      500,
+  )
 
 
 def send_line_notification(
@@ -153,7 +163,7 @@ def init_db():
     print(f'DB Init Error: {e}')
 
 
-# สั่งสร้างฐานข้อมูลทันทีเมื่อแอปเริ่มทำงานผ่าน App Context (รองรับ Gunicorn)
+# สั่งสร้างฐานข้อมูลตอนเริ่มต้น
 with app.app_context():
   init_db()
 
@@ -172,180 +182,177 @@ def login_required(f):
 
 @app.route('/', methods=['GET'])
 def index():
-  try:
-    active_tab = request.args.get('tab', 'submit')
-    track_query = request.args.get('track_query', '').strip()
-    track_results = None
+  active_tab = request.args.get('tab', 'submit')
+  track_query = request.args.get('track_query', '').strip()
+  track_results = None
 
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+  conn = sqlite3.connect(DB_NAME)
+  conn.row_factory = sqlite3.Row
+  cursor = conn.cursor()
 
-    if track_query:
-      cursor.execute(
-          'SELECT * FROM requests WHERE tracking_no = ? OR citizen_id = ? ORDER'
-          ' BY id DESC',
-          (track_query, track_query),
-      )
-      requests_data = cursor.fetchall()
-      track_results = []
-      for req in requests_data:
-        cursor.execute(
-            'SELECT * FROM service_logs WHERE request_id = ? ORDER BY id DESC',
-            (req['id'],),
-        )
-        logs = cursor.fetchall()
-        track_results.append({'req': req, 'logs': logs})
-
-    officer_requests = []
-    count_pending = count_process = count_success = 0
-
-    if session.get('logged_in'):
-      filter_status = request.args.get('status', '')
-      search_keyword = request.args.get('search', '').strip()
-
-      query = 'SELECT * FROM requests WHERE 1=1'
-      params = []
-
-      if filter_status:
-        query += ' AND status = ?'
-        params.append(filter_status)
-
-      if search_keyword:
-        query += (
-            ' AND (tracking_no LIKE ? OR fullname LIKE ? OR citizen_id LIKE ? OR'
-            ' service_type LIKE ?)'
-        )
-        kw = f'%{search_keyword}%'
-        params.extend([kw, kw, kw, kw])
-
-      query += ' ORDER BY id DESC'
-      cursor.execute(query, params)
-      officer_requests = cursor.fetchall()
-
-      cursor.execute(
-          "SELECT COUNT(*) FROM requests WHERE status = 'รอเจ้าหน้าที่รับเรื่อง'"
-      )
-      count_pending = cursor.fetchone()[0]
-
-      cursor.execute(
-          "SELECT COUNT(*) FROM requests WHERE status = 'กำลังดำเนินการ'"
-      )
-      count_process = cursor.fetchone()[0]
-
-      cursor.execute(
-          "SELECT COUNT(*) FROM requests WHERE status = 'ดำเนินการเสร็จสิ้น'"
-      )
-      count_success = cursor.fetchone()[0]
-
-    conn.close()
-
-    return render_template(
-        'index.html',
-        active_tab=active_tab,
-        track_query=track_query,
-        track_results=track_results,
-        officer_requests=officer_requests,
-        count_pending=count_pending,
-        count_process=count_process,
-        count_success=count_success,
-        filter_status=request.args.get('status', ''),
-        search_keyword=request.args.get('search', ''),
+  if track_query:
+    cursor.execute(
+        'SELECT * FROM requests WHERE tracking_no = ? OR citizen_id = ? ORDER'
+        ' BY id DESC',
+        (track_query, track_query),
     )
+    requests_data = cursor.fetchall()
+    track_results = []
+    for req in requests_data:
+      cursor.execute(
+          'SELECT * FROM service_logs WHERE request_id = ? ORDER BY id DESC',
+          (req['id'],),
+      )
+      logs = cursor.fetchall()
+      track_results.append({'req': req, 'logs': logs})
 
-  except Exception as e:
-    # หากเกิด Error จะแสดงรายละเอียดบนหน้าจอทันทีเพื่อตรวจสอบ
-    return (
-        f'<h2>❌ เกิดข้อผิดพลาด (Diagnostic Mode):</h2><pre>'
-        f'{traceback.format_exc()}</pre>',
-        500,
+  officer_requests = []
+  count_pending = count_process = count_success = 0
+
+  if session.get('logged_in'):
+    filter_status = request.args.get('status', '')
+    search_keyword = request.args.get('search', '').strip()
+
+    query = 'SELECT * FROM requests WHERE 1=1'
+    params = []
+
+    if filter_status:
+      query += ' AND status = ?'
+      params.append(filter_status)
+
+    if search_keyword:
+      query += ' AND (tracking_no LIKE ? OR fullname LIKE ? OR citizen_id LIKE ? OR service_type LIKE ?)'
+      kw = f'%{search_keyword}%'
+      params.extend([kw, kw, kw, kw])
+
+    query += ' ORDER BY id DESC'
+    cursor.execute(query, params)
+    officer_requests = cursor.fetchall()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM requests WHERE status = 'รอเจ้าหน้าที่รับเรื่อง'"
     )
+    count_pending = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM requests WHERE status = 'กำลังดำเนินการ'"
+    )
+    count_process = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM requests WHERE status = 'ดำเนินการเสร็จสิ้น'"
+    )
+    count_success = cursor.fetchone()[0]
+
+  conn.close()
+
+  return render_template(
+      'index.html',
+      active_tab=active_tab,
+      track_query=track_query,
+      track_results=track_results,
+      officer_requests=officer_requests,
+      count_pending=count_pending,
+      count_process=count_process,
+      count_success=count_success,
+      filter_status=request.args.get('status', ''),
+      search_keyword=request.args.get('search', ''),
+  )
 
 
 @app.route('/submit', methods=['POST'])
 def submit():
-  service_type = request.form.get('service_type')
-  citizen_id = request.form.get('citizen_id')
-  fullname = request.form.get('fullname')
-  phone = request.form.get('phone')
-  details = request.form.get('details')
-  latitude = request.form.get('latitude', '')
-  longitude = request.form.get('longitude', '')
+  try:
+    service_type = request.form.get('service_type')
+    citizen_id = request.form.get('citizen_id')
+    fullname = request.form.get('fullname')
+    phone = request.form.get('phone')
+    details = request.form.get('details')
+    latitude = request.form.get('latitude', '')
+    longitude = request.form.get('longitude', '')
 
-  image_filename = ''
-  if 'request_image' in request.files:
-    file = request.files['request_image']
-    if file and file.filename != '' and allowed_file(file.filename):
-      try:
+    image_filename = ''
+    if 'request_image' in request.files:
+      file = request.files['request_image']
+      if file and file.filename != '' and allowed_file(file.filename):
         filename = secure_filename(file.filename)
         timestamp_str = datetime.now().strftime('%Y%m%d%H%M%S_')
         image_filename = timestamp_str + filename
         if not os.path.exists(app.config['UPLOAD_FOLDER']):
           os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], image_filename))
-      except Exception as e:
-        print(f'Save file error: {e}')
 
-  date_str = datetime.now().strftime('%Y%m%d')
-  conn = sqlite3.connect(DB_NAME)
-  cursor = conn.cursor()
+    date_str = datetime.now().strftime('%Y%m%d')
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
 
-  cursor.execute(
-      'SELECT COUNT(*) FROM requests WHERE created_at LIKE ?', (f'{date_str}%',)
-  )
-  count = cursor.fetchone()[0] + 1
-  tracking_no = f'ES-{date_str}-{count:04d}'
-  created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute(
+        'SELECT COUNT(*) FROM requests WHERE created_at LIKE ?',
+        (f'{date_str}%',),
+    )
+    count = cursor.fetchone()[0] + 1
+    tracking_no = f'ES-{date_str}-{count:04d}'
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-  cursor.execute(
-      '''
-        INSERT INTO requests (tracking_no, citizen_id, fullname, phone, service_type, details, image_filename, latitude, longitude, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''',
-      (
-          tracking_no,
-          citizen_id,
-          fullname,
-          phone,
-          service_type,
-          details,
-          image_filename,
-          latitude,
-          longitude,
-          created_at,
-      ),
-  )
+    cursor.execute(
+        '''
+            INSERT INTO requests (tracking_no, citizen_id, fullname, phone, service_type, details, image_filename, latitude, longitude, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (
+            tracking_no,
+            citizen_id,
+            fullname,
+            phone,
+            service_type,
+            details,
+            image_filename,
+            latitude,
+            longitude,
+            created_at,
+        ),
+    )
 
-  req_id = cursor.lastrowid
-  cursor.execute(
-      '''
-        INSERT INTO service_logs (request_id, staff_name, action_status, log_detail, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''',
-      (
-          req_id,
-          'ระบบออนไลน์',
-          'รอเจ้าหน้าที่รับเรื่อง',
-          'ประชาชนยื่นคำร้องผ่านระบบออนไลน์เรียบร้อยแล้ว',
-          created_at,
-      ),
-  )
+    req_id = cursor.lastrowid
+    cursor.execute(
+        '''
+            INSERT INTO service_logs (request_id, staff_name, action_status, log_detail, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''',
+        (
+            req_id,
+            'ระบบออนไลน์',
+            'รอเจ้าหน้าที่รับเรื่อง',
+            'ประชาชนยื่นคำร้องผ่านระบบออนไลน์เรียบร้อยแล้ว',
+            created_at,
+        ),
+    )
 
-  conn.commit()
-  conn.close()
+    conn.commit()
+    conn.close()
 
-  send_line_notification(
-      tracking_no,
-      fullname,
-      phone,
-      service_type,
-      details,
-      latitude,
-      longitude,
-  )
+    send_line_notification(
+        tracking_no,
+        fullname,
+        phone,
+        service_type,
+        details,
+        latitude,
+        longitude,
+    )
 
-  flash(f'ส่งคำร้องสำเร็จ! เลขที่ติดตามของคุณคือ: {tracking_no}', 'success_submit')
-  return redirect(url_for('index', tab='track', track_query=tracking_no))
+    flash(
+        f'ส่งคำร้องสำเร็จ! เลขที่ติดตามของคุณคือ: {tracking_no}',
+        'success_submit',
+    )
+    return redirect(url_for('index', tab='track', track_query=tracking_no))
+
+  except Exception as e:
+    return (
+        f'<h2>❌ เกิดข้อผิดพลาดตอนกดส่งคำร้อง:</h2><pre>'
+        f'{traceback.format_exc()}</pre>',
+        500,
+    )
 
 
 @app.route('/login', methods=['POST'])
