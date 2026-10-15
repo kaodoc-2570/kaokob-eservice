@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import sqlite3
+import traceback
 from flask import (
     Flask,
     flash,
@@ -171,82 +172,94 @@ def login_required(f):
 
 @app.route('/', methods=['GET'])
 def index():
-  active_tab = request.args.get('tab', 'submit')
-  track_query = request.args.get('track_query', '').strip()
-  track_results = None
+  try:
+    active_tab = request.args.get('tab', 'submit')
+    track_query = request.args.get('track_query', '').strip()
+    track_results = None
 
-  conn = sqlite3.connect(DB_NAME)
-  conn.row_factory = sqlite3.Row
-  cursor = conn.cursor()
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
 
-  if track_query:
-    cursor.execute(
-        'SELECT * FROM requests WHERE tracking_no = ? OR citizen_id = ? ORDER'
-        ' BY id DESC',
-        (track_query, track_query),
-    )
-    requests_data = cursor.fetchall()
-    track_results = []
-    for req in requests_data:
+    if track_query:
       cursor.execute(
-          'SELECT * FROM service_logs WHERE request_id = ? ORDER BY id DESC',
-          (req['id'],),
+          'SELECT * FROM requests WHERE tracking_no = ? OR citizen_id = ? ORDER'
+          ' BY id DESC',
+          (track_query, track_query),
       )
-      logs = cursor.fetchall()
-      track_results.append({'req': req, 'logs': logs})
+      requests_data = cursor.fetchall()
+      track_results = []
+      for req in requests_data:
+        cursor.execute(
+            'SELECT * FROM service_logs WHERE request_id = ? ORDER BY id DESC',
+            (req['id'],),
+        )
+        logs = cursor.fetchall()
+        track_results.append({'req': req, 'logs': logs})
 
-  officer_requests = []
-  count_pending = count_process = count_success = 0
+    officer_requests = []
+    count_pending = count_process = count_success = 0
 
-  if session.get('logged_in'):
-    filter_status = request.args.get('status', '')
-    search_keyword = request.args.get('search', '').strip()
+    if session.get('logged_in'):
+      filter_status = request.args.get('status', '')
+      search_keyword = request.args.get('search', '').strip()
 
-    query = 'SELECT * FROM requests WHERE 1=1'
-    params = []
+      query = 'SELECT * FROM requests WHERE 1=1'
+      params = []
 
-    if filter_status:
-      query += ' AND status = ?'
-      params.append(filter_status)
+      if filter_status:
+        query += ' AND status = ?'
+        params.append(filter_status)
 
-    if search_keyword:
-      query += ' AND (tracking_no LIKE ? OR fullname LIKE ? OR citizen_id LIKE ? OR service_type LIKE ?)'
-      kw = f'%{search_keyword}%'
-      params.extend([kw, kw, kw, kw])
+      if search_keyword:
+        query += (
+            ' AND (tracking_no LIKE ? OR fullname LIKE ? OR citizen_id LIKE ? OR'
+            ' service_type LIKE ?)'
+        )
+        kw = f'%{search_keyword}%'
+        params.extend([kw, kw, kw, kw])
 
-    query += ' ORDER BY id DESC'
-    cursor.execute(query, params)
-    officer_requests = cursor.fetchall()
+      query += ' ORDER BY id DESC'
+      cursor.execute(query, params)
+      officer_requests = cursor.fetchall()
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM requests WHERE status = 'รอเจ้าหน้าที่รับเรื่อง'"
+      cursor.execute(
+          "SELECT COUNT(*) FROM requests WHERE status = 'รอเจ้าหน้าที่รับเรื่อง'"
+      )
+      count_pending = cursor.fetchone()[0]
+
+      cursor.execute(
+          "SELECT COUNT(*) FROM requests WHERE status = 'กำลังดำเนินการ'"
+      )
+      count_process = cursor.fetchone()[0]
+
+      cursor.execute(
+          "SELECT COUNT(*) FROM requests WHERE status = 'ดำเนินการเสร็จสิ้น'"
+      )
+      count_success = cursor.fetchone()[0]
+
+    conn.close()
+
+    return render_template(
+        'index.html',
+        active_tab=active_tab,
+        track_query=track_query,
+        track_results=track_results,
+        officer_requests=officer_requests,
+        count_pending=count_pending,
+        count_process=count_process,
+        count_success=count_success,
+        filter_status=request.args.get('status', ''),
+        search_keyword=request.args.get('search', ''),
     )
-    count_pending = cursor.fetchone()[0]
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM requests WHERE status = 'กำลังดำเนินการ'"
+  except Exception as e:
+    # หากเกิด Error จะแสดงรายละเอียดบนหน้าจอทันทีเพื่อตรวจสอบ
+    return (
+        f'<h2>❌ เกิดข้อผิดพลาด (Diagnostic Mode):</h2><pre>'
+        f'{traceback.format_exc()}</pre>',
+        500,
     )
-    count_process = cursor.fetchone()[0]
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM requests WHERE status = 'ดำเนินการเสร็จสิ้น'"
-    )
-    count_success = cursor.fetchone()[0]
-
-  conn.close()
-
-  return render_template(
-      'index.html',
-      active_tab=active_tab,
-      track_query=track_query,
-      track_results=track_results,
-      officer_requests=officer_requests,
-      count_pending=count_pending,
-      count_process=count_process,
-      count_success=count_success,
-      filter_status=request.args.get('status', ''),
-      search_keyword=request.args.get('search', ''),
-  )
 
 
 @app.route('/submit', methods=['POST'])
