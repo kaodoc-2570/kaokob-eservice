@@ -2,7 +2,9 @@ from datetime import datetime
 import functools
 import json
 import os
+import random
 import sqlite3
+import string
 import traceback
 from flask import (
     Flask,
@@ -286,12 +288,18 @@ def submit():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    cursor.execute(
-        'SELECT COUNT(*) FROM requests WHERE created_at LIKE ?',
-        (f'{date_str}%',),
-    )
-    count = cursor.fetchone()[0] + 1
-    tracking_no = f'ES-{date_str}-{count:04d}'
+    # สร้างเลขติดตามแบบสุ่มท้าย ป้องกันการซ้ำซ้อน (UNIQUE constraint failed) 100%
+    while True:
+      rand_suffix = ''.join(
+          random.choices(string.ascii_uppercase + string.digits, k=4)
+      )
+      tracking_no = f'ES-{date_str}-{rand_suffix}'
+      cursor.execute(
+          'SELECT COUNT(*) FROM requests WHERE tracking_no = ?', (tracking_no,)
+      )
+      if cursor.fetchone()[0] == 0:
+        break
+
     created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     cursor.execute(
