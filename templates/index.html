@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบ E-Service องค์การบริหารส่วนตำบลเขากอบ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS สำหรับระบบแผนที่พิกัด -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f4f7f6; }
+        .nav-pills .nav-link.active { background-color: #198754; font-weight: bold; }
+        .card-stat { border-radius: 10px; border: none; }
+        #map { height: 350px; width: 100%; border-radius: 8px; border: 1px solid #ced4da; }
+    </style>
+</head>
+<body>
+    <!-- Header/Navbar -->
+    <nav class="navbar navbar-dark bg-success shadow-sm sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="/">🏛️ E-Service องค์การบริหารส่วนตำบลเขากอบ จ.ตรัง</a>
+            {% if session.get('logged_in') %}
+                <div class="text-white small d-flex align-items-center">
+                    <span class="me-3">👤 ผู้ใช้: <strong>{{ session.get('fullname') }}</strong></span>
+                    <button class="btn btn-warning btn-sm me-2 fw-bold text-dark" data-bs-toggle="modal" data-bs-target="#changePasswordModal">🔑 เปลี่ยนรหัสผ่าน</button>
+                    <a href="/logout" class="btn btn-outline-light btn-sm">🚪 ออกจากระบบ</a>
+                </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <div class="container mt-4 mb-5">
+        <!-- เมนูหลักสลับหน้า (Tabs Navigation) -->
+        <ul class="nav nav-pills nav-fill bg-white p-2 rounded shadow-sm mb-4">
+            <li class="nav-item">
+                <a class="nav-link {% if active_tab == 'submit' %}active{% endif %}" href="/?tab=submit">📝 1. ยื่นคำร้องออนไลน์</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if active_tab == 'track' %}active{% endif %}" href="/?tab=track">🔍 2. ตรวจสอบสถานะคำร้อง</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if active_tab == 'officer' %}active{% endif %}" href="/?tab=officer">👨‍💼 3. เจ้าหน้าที่ดำเนินการ</a>
+            </li>
+        </ul>
+
+        <!-- Flash Alert Notification -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    {% if category == 'success_submit' %}
+                        <script>
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'ส่งคำร้องสำเร็จ!',
+                                text: '{{ message }}',
+                                confirmButtonColor: '#198754'
+                            });
+                        </script>
+                    {% else %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- TAB 1: แบบฟอร์มยื่นคำร้อง (ประชาชน) พร้อมอัปโหลดรูปและปักหมุดแผนที่ -->
+        {% if active_tab == 'submit' %}
+        <div class="row justify-content-center">
+            <div class="col-md-9">
+                <div class="card shadow border-0">
+                    <div class="card-header bg-success text-white text-center py-3">
+                        <h4 class="mb-0">ระบบบริการประชาชนออนไลน์ (E-Service)</h4>
+                        <small>องค์การบริหารส่วนตำบลเขากอบ อำเภอห้วยยอด จังหวัดตรัง</small>
+                    </div>
+                    <div class="card-body p-4">
+                        <form action="/submit" method="POST" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">1. ประเภทบริการที่ต้องการ (E-Service):</label>
+                                <select name="service_type" class="form-select" required>
+                                    <option value="">-- เลือกประเภทคำร้อง --</option>
+                                    <option value="แจ้งซ่อมไฟฟ้าสาธารณะ/หลอดไฟเสีย (กองช่าง)">แจ้งซ่อมไฟฟ้าสาธารณะ/หลอดไฟเสีย (กองช่าง)</option>
+                                    <option value="แจ้งซ่อมถนนชำรุด/หลุมบ่อ (กองช่าง)">แจ้งซ่อมถนนชำรุด/หลุมบ่อ (กองช่าง)</option>
+                                    <option value="ขอรับบริการดูดสิ่งปฏิกูล/ดูดส้วม (สำนักปลัด)">ขอรับบริการดูดสิ่งปฏิกูล/ดูดส้วม (สำนักปลัด)</option>
+                                    <option value="ลงทะเบียนเบี้ยยังชีพผู้สูงอายุ/คนพิการ (กองสวัสดิการฯ)">ลงทะเบียนเบี้ยยังชีพผู้สูงอายุ/คนพิการ (กองสวัสดิการฯ)</option>
+                                    <option value="ยื่นเรื่องร้องเรียน/ร้องทุกข์ทั่วไป">ยื่นเรื่องร้องเรียน/ร้องทุกข์ทั่วไป</option>
+                                </select>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">2. เลขประจำตัวประชาชน (13 หลัก):</label>
+                                    <input type="text" name="citizen_id" class="form-control" maxlength="13" required placeholder="กรอกเลขบัตรประชาชน 13 หลัก">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold">3. เบอร์โทรศัพท์ที่ติดต่อได้:</label>
+                                    <input type="text" name="phone" class="form-control" required placeholder="เช่น 0812345678">
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">4. ชื่อ - นามสกุล ผู้ยื่นคำร้อง:</label>
+                                <input type="text" name="fullname" class="form-control" required placeholder="เช่น นายสมชาย เขากอบ">
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">5. รายละเอียดคำร้อง / สถานที่เกิดเหตุ:</label>
+                                <textarea name="details" class="form-control" rows="3" required placeholder="ระบุรายละเอียด เช่น บ้านเลขที่ หมู่บ้าน ซอย จุดสังเกต..."></textarea>
+                            </div>
+
+                            <!-- ฟีเจอร์อัปโหลดภาพ -->
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">6. แนบรูปถ่ายหลักฐาน / จุดเกิดเหตุ (ถ้ามี):</label>
+                                <input type="file" name="request_image" class="form-control" accept="image/*">
+                                <small class="text-muted">รองรับไฟล์ภาพนามสกุล: .jpg, .jpeg, .png</small>
+                            </div>
+
+                            <!-- ฟีเจอร์ปักหมุดแผนที่ Google Maps / Leaflet -->
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">7. ปักหมุดตำแหน่งจุดเกิดเหตุบนแผนที่:</label>
+                                <div class="mb-2">
+                                    <button type="button" id="getLocBtn" class="btn btn-outline-success btn-sm fw-bold">📍 ดึงตำแหน่งปัจจุบันของฉัน (GPS)</button>
+                                    <span id="locStatus" class="ms-2 small text-muted">กำลังรอการปักหมุด...</span>
+                                </div>
+                                <div id="map"></div>
+                                <input type="hidden" name="latitude" id="latitude">
+                                <input type="hidden" name="longitude" id="longitude">
+                            </div>
+
+                            <button type="submit" class="btn btn-success w-100 py-2 fw-bold fs-5">📤 ส่งข้อมูลคำร้องออนไลน์</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- TAB 2: ตรวจสอบสถานะคำร้อง (ประชาชน) แสดงภาพและแผนที่ -->
+        {% if active_tab == 'track' %}
+        <div class="row justify-content-center">
+            <div class="col-md-9">
+                <div class="card shadow border-0 p-4">
+                    <h3 class="text-center text-success mb-3">🔍 ตรวจสอบสถานะคำร้องออนไลน์</h3>
+                    <form action="/" method="GET" class="input-group mb-4">
+                        <input type="hidden" name="tab" value="track">
+                        <input type="text" name="track_query" class="form-control" value="{{ track_query }}" placeholder="กรอกเลขที่คำร้อง (เช่น ES-20261014-0001) หรือเลขบัตรประชาชน" required>
+                        <button class="btn btn-success" type="submit">ค้นหาข้อมูล</button>
+                    </form>
+
+                    {% if track_results is not none %}
+                        {% if track_results %}
+                            {% for item in track_results %}
+                            <div class="card mb-4 border-success">
+                                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold">เลขที่คำร้อง: {{ item.req['tracking_no'] }}</span>
+                                    <span class="badge bg-light text-dark fs-6">{{ item.req['status'] }}</span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-8">
+                                            <p class="mb-1"><strong>ประเภทบริการ:</strong> {{ item.req['service_type'] }}</p>
+                                            <p class="mb-1"><strong>ผู้ยื่นเรื่อง:</strong> {{ item.req['fullname'] }} (โทร: {{ item.req['phone'] }})</p>
+                                            <p class="mb-2"><strong>รายละเอียด:</strong> {{ item.req['details'] }}</p>
+                                            
+                                            {% if item.req['latitude'] and item.req['longitude'] %}
+                                                <p class="mb-2">
+                                                    <a href="https://www.google.com/maps?q={{ item.req['latitude'] }},{{ item.req['longitude'] }}" target="_blank" class="btn btn-sm btn-outline-primary fw-bold">
+                                                        🗺️ เปิดดูตำแหน่งพิกัดบน Google Maps
+                                                    </a>
+                                                </p>
+                                            {% endif %}
+                                        </div>
+                                        <div class="col-md-4 text-center">
+                                            {% if item.req['image_filename'] %}
+                                                <a href="{{ url_for('static', filename='uploads/' + item.req['image_filename']) }}" target="_blank">
+                                                    <img src="{{ url_for('static', filename='uploads/' + item.req['image_filename']) }}" class="img-fluid rounded border shadow-sm" style="max-height: 150px;" alt="รูปหลักฐาน">
+                                                </a>
+                                                <br><small class="text-muted">คลิกที่ภาพเพื่อดูขนาดใหญ่</small>
+                                            {% else %}
+                                                <div class="text-muted small border p-3 rounded bg-light">ไม่มีรูปภาพแนบ</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold text-success mt-4">📌 ประวัติความคืบหน้าการให้บริการ:</h6>
+                                    <div class="list-group">
+                                        {% for log in item.logs %}
+                                        <div class="list-group-item">
+                                            <div class="d-flex w-100 justify-content-between">
+                                                <strong class="text-primary">{{ log['action_status'] }}</strong>
+                                                <small class="text-muted">{{ log['created_at'] }}</small>
+                                            </div>
+                                            <p class="mb-1 small text-dark mt-1">{{ log['log_detail'] }}</p>
+                                            <small class="text-muted">โดย: {{ log['staff_name'] }}</small>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="alert alert-warning text-center">ไม่พบข้อมูลคำร้องจากคำค้นหานี้</div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- TAB 3: ส่วนเจ้าหน้าที่ดำเนินการ (แสดงภาพและพิกัดแผนที่) -->
+        {% if active_tab == 'officer' %}
+            {% if not session.get('logged_in') %}
+            <div class="row justify-content-center py-5">
+                <div class="col-md-5">
+                    <div class="card shadow-lg border-0">
+                        <div class="card-header bg-dark text-white text-center py-3">
+                            <h4 class="mb-0">🔒 เข้าสู่ระบบเจ้าหน้าที่ อบต.เขากอบ</h4>
+                        </div>
+                        <div class="card-body p-4">
+                            <form action="/login" method="POST">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">ชื่อผู้ใช้งาน (Username):</label>
+                                    <input type="text" name="username" class="form-control" required placeholder="admin">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">รหัสผ่าน (Password):</label>
+                                    <input type="password" name="password" class="form-control" required placeholder="kaokob1234">
+                                </div>
+                                <button type="submit" class="btn btn-dark w-100 py-2 fw-bold">🔑 เข้าสู่ระบบ</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <!-- สถิติงาน -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="card card-stat bg-warning text-dark p-3 shadow-sm">
+                        <h6 class="fw-bold">⏳ คำร้องรอรับเรื่อง</h6>
+                        <h2 class="fw-bold mb-0">{{ count_pending }} รายการ</h2>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card card-stat bg-info text-dark p-3 shadow-sm">
+                        <h6 class="fw-bold">🛠️ อยู่ระหว่างดำเนินการ</h6>
+                        <h2 class="fw-bold mb-0">{{ count_process }} รายการ</h2>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card card-stat bg-success text-white p-3 shadow-sm">
+                        <h6 class="fw-bold">✅ ดำเนินการเสร็จสิ้น</h6>
+                        <h2 class="fw-bold mb-0">{{ count_success }} รายการ</h2>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ตารางงานเจ้าหน้าที่ -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white fw-bold py-3">
+                    📋 ตารางการดำเนินงานของเจ้าหน้าที่ (อบต.เขากอบ)
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light text-center">
+                                <tr>
+                                    <th>เลขที่คำร้อง</th>
+                                    <th>ผู้ยื่น / ข้อมูลติดต่อ</th>
+                                    <th>บริการ / รายละเอียด / พิกัด</th>
+                                    <th>รูปหลักฐาน</th>
+                                    <th>สถานะ</th>
+                                    <th>อัปเดตงาน</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in officer_requests %}
+                                <tr>
+                                    <td class="fw-bold text-center text-primary">{{ row['tracking_no'] }}<br><small class="text-muted">{{ row['created_at'] }}</small></td>
+                                    <td>
+                                        <strong>{{ row['fullname'] }}</strong><br>
+                                        <small class="text-muted">🆔 {{ row['citizen_id'] }}</small><br>
+                                        <small class="text-muted">📞 {{ row['phone'] }}</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary mb-1">{{ row['service_type'] }}</span><br>
+                                        <small class="text-dark">{{ row['details'] }}</small>
+                                        {% if row['latitude'] and row['longitude'] %}
+                                            <br><a href="https://www.google.com/maps?q={{ row['latitude'] }},{{ row['longitude'] }}" target="_blank" class="small text-primary fw-bold">📍 เปิดพิกัดบน Google Maps</a>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if row['image_filename'] %}
+                                            <a href="{{ url_for('static', filename='uploads/' + row['image_filename']) }}" target="_blank">
+                                                <img src="{{ url_for('static', filename='uploads/' + row['image_filename'] ) }}" class="rounded border" style="width: 70px; height: 70px; object-fit: cover;" alt="ภาพ">
+                                            </a>
+                                        {% else %}
+                                            <span class="small text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if row['status'] == 'รอเจ้าหน้าที่รับเรื่อง' %}
+                                            <span class="badge bg-warning text-dark">รอรับเรื่อง</span>
+                                        {% elif row['status'] == 'กำลังดำเนินการ' %}
+                                            <span class="badge bg-info text-dark">กำลังดำเนินการ</span>
+                                        {% elif row['status'] == 'ดำเนินการเสร็จสิ้น' %}
+                                            <span class="badge bg-success">เสร็จสิ้น</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">{{ row['status'] }}</span>
+                                        {% endif %}
+                                        {% if row['assigned_officer'] %}
+                                            <br><small class="text-muted">👤 {{ row['assigned_officer'] }}</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <form action="/officer/update/{{ row['id'] }}" method="POST" class="p-2 bg-light rounded border">
+                                            <div class="mb-2">
+                                                <input type="text" name="staff_name" class="form-control form-control-sm" placeholder="ชื่อเจ้าหน้าที่" value="{{ row['assigned_officer'] if row['assigned_officer'] else session.get('fullname') }}" required>
+                                            </div>
+                                            <div class="mb-2">
+                                                <select name="action_status" class="form-select form-select-sm" required>
+                                                    <option value="รอเจ้าหน้าที่รับเรื่อง" {% if row['status']=='รอเจ้าหน้าที่รับเรื่อง' %}selected{% endif %}>รอเจ้าหน้าที่รับเรื่อง</option>
+                                                    <option value="กำลังดำเนินการ" {% if row['status']=='กำลังดำเนินการ' %}selected{% endif %}>กำลังดำเนินการ</option>
+                                                    <option value="ดำเนินการเสร็จสิ้น" {% if row['status']=='ดำเนินการเสร็จสิ้น' %}selected{% endif %}>ดำเนินการเสร็จสิ้น</option>
+                                                    <option value="ยกเลิก/ปฏิเสธคำร้อง" {% if row['status']=='ยกเลิก/ปฏิเสธคำร้อง' %}selected{% endif %}>ยกเลิก/ปฏิเสธคำร้อง</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-2">
+                                                <input type="text" name="log_detail" class="form-control form-control-sm" placeholder="บันทึกข้อความ..." required>
+                                            </div>
+                                            <button type="submit" class="btn btn-sm btn-success w-100 fw-bold">💾 บันทึก</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center py-5 text-muted">ไม่พบคำร้องในระบบ</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    <!-- Modal เปลี่ยนรหัสผ่านเจ้าหน้าที่ -->
+    {% if session.get('logged_in') %}
+    <div class="modal fade" id="changePasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title">🔑 กำหนด / เปลี่ยนรหัสผ่านใหม่</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form action="/change_password" method="POST">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">รหัสผ่านเดิม:</label>
+                            <input type="password" name="old_password" class="form-control" required placeholder="รหัสผ่านปัจจุบัน">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">รหัสผ่านใหม่:</label>
+                            <input type="password" name="new_password" class="form-control" required placeholder="รหัสผ่านใหม่">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">ยืนยันรหัสผ่านใหม่:</label>
+                            <input type="password" name="confirm_password" class="form-control" required placeholder="ยืนยันรหัสผ่านใหม่อีกครั้ง">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="submit" class="btn btn-success fw-bold">💾 บันทึก</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Leaflet JS สำหรับสร้างแผนที่ปักหมุด -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // ทำงานเฉพาะเมื่ออยู่หน้าแท็บยื่นคำร้อง (submit)
+        {% if active_tab == 'submit' %}
+        document.addEventListener("DOMContentLoaded", function() {
+            // ตั้งค่าพิกัดเริ่มต้นศูนย์กลางที่ อบต.เขากอบ อำเภอห้วยยอด จังหวัดตรัง
+            var defaultLat = 7.8250; 
+            var defaultLng = 99.6300;
+
+            var map = L.map('map').setView([defaultLat, defaultLng], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+
+            var marker = L.marker([defaultLat, defaultLng], {draggable: true}).addTo(map);
+
+            function updateMarkerPosition(lat, lng) {
+                marker.setLatLng([lat, lng]);
+                map.setView([lat, lng], 16);
+                document.getElementById('latitude').value = lat.toFixed(6);
+                document.getElementById('longitude').value = lng.toFixed(6);
+                document.getElementById('locStatus').innerText = "พิกัด: " + lat.toFixed(6) + ", " + lng.toFixed(6);
+            }
+
+            // คลิกบนแผนที่เพื่อเปลี่ยนจุดปักหมุด
+            map.on('click', function(e) {
+                updateMarkerPosition(e.latlng.lat, e.latlng.lng);
+            });
+
+            // ลากหมุดเพื่อเลือกตำแหน่ง
+            marker.on('dragend', function(event) {
+                var position = marker.getLatLng();
+                updateMarkerPosition(position.lat, position.lng);
+            });
+
+            // ปุ่มดึงพิกัดปัจจุบัน GPS ของผู้ใช้
+            document.getElementById('getLocBtn').addEventListener('click', function() {
+                if (navigator.geolocation) {
+                    document.getElementById('locStatus').innerText = "กำลังค้นหาตำแหน่ง GPS ของคุณ...";
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        var lat = position.coords.latitude;
+                        var lng = position.coords.longitude;
+                        updateMarkerPosition(lat, lng);
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'ดึงพิกัดสำเร็จ!',
+                            text: 'ระบุตำแหน่งปัจจุบันของคุณลงบนแผนที่เรียบร้อย',
+                            timer: 1500,
+                            showConfirmButton: false
+                        });
+                    }, function(error) {
+                        Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถเข้าถึงตำแหน่ง GPS ของอุปกรณ์คุณได้', 'error');
+                        document.getElementById('locStatus').innerText = "ไม่สามารถดึง GPS ได้";
+                    });
+                } else {
+                    alert("เบราว์เซอร์ของคุณไม่รองรับการระบุตำแหน่ง Geolocation");
+                }
+            });
+
+            // ตั้งค่าเริ่มต้นค่าพิกัด
+            updateMarkerPosition(defaultLat, defaultLng);
+        });
+        {% endif %}
+    </script>
+</body>
+</html>
