@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบเจ้าหน้าที่รับเรื่อง - อบต.เขากอบ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f0f2f5; }
+        .card-stat { border-radius: 12px; border: none; }
+    </style>
+</head>
+<body>
+    <!-- Navbar เจ้าหน้าที่ -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-success shadow-sm">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand fw-bold" href="/officer">👨‍💼 ระบบเจ้าหน้าที่รับเรื่องและดำเนินการ (อบต.เขากอบ)</a>
+            <div class="d-flex align-items-center">
+                <a href="/" class="btn btn-light btn-sm text-success fw-bold me-2" target="_blank">🌐 หน้าประชาชน</a>
+                <a href="/officer" class="btn btn-outline-light btn-sm">🔄 รีเฟรช</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4 px-4 mb-5">
+        <!-- สรุปสถิติงาน -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card card-stat bg-warning text-dark p-3 shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="mb-1 fw-bold">⏳ คำร้องรอเจ้าหน้าที่รับเรื่อง</h6>
+                            <h2 class="mb-0 fw-bold">{{ count_pending }} รายการ</h2>
+                        </div>
+                        <span class="fs-1">📥</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-stat bg-info text-dark p-3 shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="mb-1 fw-bold">⚙️ อยู่ระหว่างดำเนินการ</h6>
+                            <h2 class="mb-0 fw-bold">{{ count_process }} รายการ</h2>
+                        </div>
+                        <span class="fs-1">🛠️</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-stat bg-success text-white p-3 shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="mb-1 fw-bold">✅ ดำเนินการเสร็จสิ้น</h6>
+                            <h2 class="mb-0 fw-bold">{{ count_success }} รายการ</h2>
+                        </div>
+                        <span class="fs-1">🎉</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ฟอร์มค้นหาและกรองข้อมูล -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body bg-white rounded">
+                <form action="/officer" method="GET" class="row g-2">
+                    <div class="col-md-5">
+                        <input type="text" name="search" class="form-control" placeholder="ค้นหาตามเลขคำร้อง, ชื่อประชาชน, เบอร์โทร..." value="{{ search_keyword }}">
+                    </div>
+                    <div class="col-md-4">
+                        <select name="status" class="form-select">
+                            <option value="">-- กรองตามสถานะทั้งหมด --</option>
+                            <option value="รอเจ้าหน้าที่รับเรื่อง" {% if filter_status == 'รอเจ้าหน้าที่รับเรื่อง' %}selected{% endif %}>รอเจ้าหน้าที่รับเรื่อง</option>
+                            <option value="กำลังดำเนินการ" {% if filter_status == 'กำลังดำเนินการ' %}selected{% endif %}>กำลังดำเนินการ</option>
+                            <option value="ดำเนินการเสร็จสิ้น" {% if filter_status == 'ดำเนินการเสร็จสิ้น' %}selected{% endif %}>ดำเนินการเสร็จสิ้น</option>
+                            <option value="ยกเลิก/ปฏิเสธคำร้อง" {% if filter_status == 'ยกเลิก/ปฏิเสธคำร้อง' %}selected{% endif %}>ยกเลิก/ปฏิเสธคำร้อง</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex gap-2">
+                        <button type="submit" class="btn btn-success w-100 fw-bold">🔍 ค้นหา</button>
+                        <a href="/officer" class="btn btn-secondary w-100">ล้างค้นหา</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ตารางรายการคำร้อง -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-dark text-white fw-bold py-3 d-flex justify-content-between align-items-center">
+                <span>📋 รายการคำร้องที่เข้ามาในระบบ</span>
+                <span class="badge bg-light text-dark">ทั้งหมด {{ requests|length }} รายการ</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light text-center">
+                            <tr>
+                                <th>เลขที่คำร้อง</th>
+                                <th>วันที่ยื่น</th>
+                                <th>ผู้ยื่นคำร้อง</th>
+                                <th>ประเภทบริการ</th>
+                                <th>สถานะปัจจุบัน</th>
+                                <th>เจ้าหน้าที่ผู้รับเรื่อง</th>
+                                <th>การดำเนินการ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in requests %}
+                            <tr>
+                                <td class="fw-bold text-center text-primary">{{ row['tracking_no'] }}</td>
+                                <td class="small text-center text-muted">{{ row['created_at'] }}</td>
+                                <td>
+                                    <strong>{{ row['fullname'] }}</strong><br>
+                                    <small class="text-muted">📞 {{ row['phone'] }}</small>
+                                </td>
+                                <td><span class="badge bg-secondary">{{ row['service_type'] }}</span></td>
+                                <td class="text-center">
+                                    {% if row['status'] == 'รอเจ้าหน้าที่รับเรื่อง' %}
+                                        <span class="badge bg-warning text-dark">รอรับเรื่อง</span>
+                                    {% elif row['status'] == 'กำลังดำเนินการ' %}
+                                        <span class="badge bg-info text-dark">กำลังดำเนินการ</span>
+                                    {% elif row['status'] == 'ดำเนินการเสร็จสิ้น' %}
+                                        <span class="badge bg-success">เสร็จสิ้น</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">{{ row['status'] }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {% if row['assigned_officer'] %}
+                                        <span class="badge bg-light text-dark border">👤 {{ row['assigned_officer'] }}</span>
+                                    {% else %}
+                                        <small class="text-muted">- ยังไม่มีผู้รับเรื่อง -</small>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <a href="/officer/process/{{ row['id'] }}" class="btn btn-sm btn-primary fw-bold px-3">
+                                        🛠️ เข้าดำเนินการ
+                                    </a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center py-5 text-muted">ไม่พบรายการคำร้อง</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
