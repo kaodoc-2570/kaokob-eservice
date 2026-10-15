@@ -19,7 +19,7 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = 'kaokob_eservice_secret_key_2026'
 
-# ใช้ absolute path เพื่อป้องกันปัญหา Path ไม่ตรงบน Render
+# ใช้ Absolute Path เพื่อป้องกันปัญหาเรื่อง Directory บน Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, 'eservice.db')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
@@ -46,7 +46,6 @@ def send_line_notification(
       not LINE_CHANNEL_ACCESS_TOKEN
       or 'YOUR_LINE' in LINE_CHANNEL_ACCESS_TOKEN
   ):
-    print('ยังไม่ได้ตั้งค่า LINE Token')
     return
 
   try:
@@ -74,7 +73,7 @@ def send_line_notification(
     }
     requests.post(url, headers=headers, data=json.dumps(payload), timeout=3)
   except Exception as e:
-    print(f'LINE Send Error: {e}')
+    print(f'LINE Error: {e}')
 
 
 def allowed_file(filename):
@@ -85,12 +84,12 @@ def allowed_file(filename):
 
 
 def init_db():
-  """สร้างโฟลเดอร์ uploads และตาราง SQLite หากยังไม่มี"""
+  """สร้างโฟลเดอร์และตารางฐานข้อมูล SQLite"""
   if not os.path.exists(UPLOAD_FOLDER):
     try:
       os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     except Exception as e:
-      print(f'Cannot create upload folder: {e}')
+      print(f'Upload folder creation error: {e}')
 
   try:
     conn = sqlite3.connect(DB_NAME)
@@ -150,15 +149,12 @@ def init_db():
     conn.commit()
     conn.close()
   except Exception as e:
-    print(f'Database Init Error: {e}')
+    print(f'DB Init Error: {e}')
 
 
-# ให้รันการตรวจสอบฐานข้อมูลก่อนประมวลผล Request แรก
-@app.before_request
-def auto_init():
-  if not getattr(app, '_got_first_request', False):
-    init_db()
-    app._got_first_request = True
+# สั่งสร้างฐานข้อมูลทันทีเมื่อแอปเริ่มทำงานผ่าน App Context (รองรับ Gunicorn)
+with app.app_context():
+  init_db()
 
 
 def login_required(f):
@@ -426,4 +422,18 @@ def officer_update(req_id):
 
   cursor.execute(
       '''
-        INSERT INTO service_logs (request
+        INSERT INTO service_logs (request_id, staff_name, action_status, log_detail, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''',
+      (req_id, staff_name, action_status, log_detail, created_at),
+  )
+
+  conn.commit()
+  conn.close()
+
+  flash('บันทึกการดำเนินการเรียบร้อยแล้ว', 'success')
+  return redirect(url_for('index', tab='officer'))
+
+
+if __name__ == '__main__':
+  app.run(host='0.0.0.0', port=5000, debug=True)
